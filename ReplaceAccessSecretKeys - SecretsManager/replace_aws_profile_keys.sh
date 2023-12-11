@@ -1,3 +1,8 @@
+##############################################################################################################################################
+##    PLEASE ADD BELOW PERMISSIONS TO IAM ROLE ATTACHED TO THE ON-PREMISE INSTANCE AS A PRE-REQUISITVE                                      ##
+##              secretsmanager:ListSecrets                                                                                                  ##
+##              secretsmanager:GetSecretValue                                                                                               ##
+##############################################################################################################################################
 #!/bin/bash
 
 echo "........... Initiating the execution ............".
