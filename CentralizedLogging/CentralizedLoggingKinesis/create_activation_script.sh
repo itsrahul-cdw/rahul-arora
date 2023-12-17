@@ -55,8 +55,8 @@ sudo systemctl stop amazon-ssm-agent
 sudo -E amazon-ssm-agent -register -code $activation_code -id $activation_id -region $aws_region
 sudo systemctl start amazon-ssm-agent
 
-echo "Update fingerprint"
-sudo amazon-ssm-agent -fingerprint -similarityThreshold 1
+#echo "Update fingerprint"
+#sudo amazon-ssm-agent -fingerprint -similarityThreshold 1
 
 echo ".............. Synching Clock .................."
 sed -i '1s/^/server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4 \n /' /etc/chrony.conf
