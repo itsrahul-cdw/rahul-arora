@@ -1,0 +1,508 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: CloudFormation template for sending AWS Inspector Findings Report to Email Recepients
+
+Parameters:
+  CMKAliasName:
+    Type: String
+    Description: Customer Manager Key Alias
+    Default: alias/Cenveo-CMK
+
+  S3BucketName:
+    Type: String
+    Description: S3 Bucket Name
+    Default: cenveobucket
+
+  # DestinationCCEmailIdentity:
+  #   Type: String
+  #   Description: SES Destination CC Recepient Email Identity
+  #   Default: rahul.arora@cdw.com
+
+  EmailSubject:
+    Type: String
+    Description: SES Email Subject
+    Default: Test Email
+
+  LambdaCronSchedulerExpression:
+    Type: String
+    Description: Lambda Cron Scheduler Expression
+    Default: cron(0 0 ? * SUN *)
+
+  SourceEmailIdentity:
+    Type: String
+    Description: SES Source Email Identity
+    Default: rahul.arora@cdw.com
+
+  DestinationTOEmailIdentity:
+    Type: String
+    Description: SES Destination TO Recepient Email Identity
+    Default: shabreenunisa.zakeer@cdw.com
+    
+Resources:
+
+  CMK:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: CMK attached to AWS Inspector Findings Report
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: CMKPolicies
+        Statement:
+          - Sid: Enable Root User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow AWS Inspector to use the key
+            Effect: Allow
+            Principal:
+              Service: !Sub 'inspector2.${AWS::Region}.amazonaws.com'
+            Action: 
+              - kms:Decrypt*
+              - kms:GenerateDataKey*
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub '${AWS::AccountId}'
+              ArnLike:
+                aws:SourceArn:
+                  !Sub 'arn:aws:inspector2:${AWS::Region}:${AWS::AccountId}:report/*' 
+  
+  CMKAlias:
+    DependsOn: CMK
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Ref CMKAliasName
+      TargetKeyId: !Ref CMK
+
+  CustomerS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'aws:kms'
+              KMSMasterKeyID: !GetAtt CMK.Arn
+            BucketKeyEnabled: true
+
+  S3TriggerLambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt AWSS3PreSignedURLLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+  
+  S3BucketPolicy:
+    DependsOn: CustomerS3Bucket
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CustomerS3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow Inspector to put file
+            Effect: Allow
+            Principal:
+              Service: !Sub 'inspector2.amazonaws.com'
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: 
+              Fn::Join:
+                - ''
+                - - 'arn:aws:s3:::'
+                  - Ref: 'CustomerS3Bucket'
+                  - '/*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  !Sub '${AWS::AccountId}'
+              ArnLike:
+                aws:SourceArn:
+                  !Sub 'arn:aws:inspector2:${AWS::Region}:${AWS::AccountId}:report/*'
+
+  SESSourceEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref SourceEmailIdentity
+
+  SESDestinationTOEmailIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DestinationTOEmailIdentity
+
+  # SESDestinationCCEmailIdentity:
+  #   Type: AWS::SES::EmailIdentity
+  #   Properties:
+  #     EmailIdentity: !Ref DestinationCCEmailIdentity
+
+  AWSS3PreSignedURLRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSInspectorLambdaRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: AWSS3PreSignedURLRole
+          PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:GetObject
+                    - s3:GetBucketLocation
+                    - s3:GetBucketNotification
+                    - s3:PutBucketNotification
+                  Resource:
+                    - !Join 
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !Ref CustomerS3Bucket
+                    - !Join 
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !Ref CustomerS3Bucket
+                        - '*'
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - ses:SendEmail
+                  Resource: '*'
+
+  AWSInspectorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSS3PreSignedURLRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: AWSInspectorLambdaCustomRole
+          PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - inspector2:CreateFindingsReport
+                  Resource:
+                    !Sub  'arn:aws:inspector2:${AWS::Region}:${AWS::AccountId}:*'
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - s3:GetObject
+                    - s3:PutObject
+                  Resource:
+                    - !Join 
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !Ref CustomerS3Bucket
+                    - !Join 
+                      - ''
+                      - - 'arn:aws:s3:::'
+                        - !Ref CustomerS3Bucket
+                        - '*'
+
+  CustomResourceLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: CustomResourceLambdaFunction
+      Description: Sending S3 Bucket Notification to AWSS3PreSignedURLLambda Lambda Function
+      Handler: index.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${AWSS3PreSignedURLRole}"
+      Code:
+        ZipFile: |
+
+            from __future__ import print_function
+            import json
+            import boto3
+            import cfnresponse
+            
+            SUCCESS = "SUCCESS"
+            FAILED = "FAILED"
+            
+            print('Loading function')
+            s3 = boto3.resource('s3')
+            
+            def lambda_handler(event, context):
+                print("Received event: " + json.dumps(event, indent=2))
+                responseData={}
+                try:
+                    if event['RequestType'] == 'Delete':
+                        print("Request Type:",event['RequestType'])
+                        Bucket=event['ResourceProperties']['Bucket']
+                        delete_notification(Bucket)
+                        print("Sending response to custom resource after Delete")
+                    elif event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                        print("Request Type:",event['RequestType'])
+                        LambdaArn=event['ResourceProperties']['LambdaArn']
+                        Bucket=event['ResourceProperties']['Bucket']
+                        add_notification(LambdaArn, Bucket)
+                        responseData={'Bucket':Bucket}
+                        print("Sending response to custom resource")
+                    responseStatus = 'SUCCESS'
+                except Exception as e:
+                    print('Failed to process:', e)
+                    responseStatus = 'FAILED'
+                    responseData = {'Failure': 'Something bad happened.'}
+                cfnresponse.send(event, context, responseStatus, responseData, "CustomResourcePhysicalID")
+
+            def add_notification(LambdaArn, Bucket):
+                bucket_notification = s3.BucketNotification(Bucket)
+                response = bucket_notification.put(
+                  NotificationConfiguration={
+                    'LambdaFunctionConfigurations': [
+                      {
+                          'LambdaFunctionArn': LambdaArn,
+                          'Events': [
+                              's3:ObjectCreated:*'
+                          ]
+                      }
+                    ]
+                  }
+                )
+                print("Put request completed....")
+              
+            def delete_notification(Bucket):
+                bucket_notification = s3.BucketNotification(Bucket)
+                response = bucket_notification.put(
+                    NotificationConfiguration={}
+                )
+                print("Delete request completed....")
+      Runtime: python3.12
+      Timeout: 50
+
+  LambdaTrigger:
+    Type: 'Custom::LambdaTrigger'
+    DependsOn: S3TriggerLambdaInvokePermission
+    Properties:
+      ServiceToken: !GetAtt CustomResourceLambdaFunction.Arn
+      LambdaArn: !GetAtt AWSS3PreSignedURLLambda.Arn
+      Bucket: !Ref S3BucketName
+
+  AWSS3PreSignedURLLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Environment:
+        Variables:
+          SourceEmailIdentity: !Ref SourceEmailIdentity
+          DestinationTOEmailIdentity: !Ref DestinationTOEmailIdentity
+          # DestinationCCEmailIdentity: !Ref DestinationCCEmailIdentity
+          EmailSubject: !Ref EmailSubject
+      FunctionName: AWSS3PreSignedURLLambda
+      Description: Export AWS Inspector Findings Report from AWS Inspector Service
+      Handler: index.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${AWSS3PreSignedURLRole}"
+      Runtime: python3.12
+      Timeout: 300
+      Code:
+        ZipFile: !Sub |
+          import os
+          import boto3
+          from botocore import client
+          from botocore.exceptions import ClientError
+
+          def lambda_handler(event, context):
+            
+            s3_client = boto3.client("s3", config=client.Config(signature_version='s3v4'))
+            ses_client = boto3.client('ses')
+
+            print(".............. Fetching S3 Bucket Name and Object Key from Lambda S3 Trigger Event ...................")
+            FILEOBJ = event["Records"][0]
+            BUCKET_NAME = str(FILEOBJ['s3']['bucket']['name'])
+            KEY = str(FILEOBJ['s3']['object']['key'])
+          
+            print(BUCKET_NAME)
+            print(KEY)
+
+            print("................. Downloading File from S3 Bucket ..........................")
+            try:
+              s3_response = s3_client.generate_presigned_url('get_object',
+                                                      Params={'Bucket': BUCKET_NAME,
+                                                              'Key': KEY},
+                                                      ExpiresIn=129600)
+            except ClientError as e:
+              logging.error(e)
+              return None
+
+            print(s3_response)
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ses/client/send_email.html
+            ses_send_email_response = ses_client.send_email(
+              Source=os.environ['SourceEmailIdentity'],
+              Destination={
+                # 'CcAddresses': [
+                #   os.environ['DestinationCCEmailIdentity'],
+                # ],
+                'ToAddresses': [
+                  os.environ['DestinationTOEmailIdentity']
+                ],
+              },
+              Message={
+                'Body': {
+                  'Html': {
+                    'Charset': 'UTF-8',
+                    'Data': f'Here is the inspector report : <a href="{s3_response}">Amazon SES Developer Guide</a> Please download',
+                    },                                                                              
+                  # 'Text': {
+                  #   'Charset': 'UTF-8',
+                  #   'Data': 'This is the message body in text format.',
+                  #   },
+                  },
+                'Subject': {
+                  'Charset': 'UTF-8',
+                  'Data': os.environ['EmailSubject'],
+                  },
+                },
+              )
+          
+            print(".............. Email has been successfully sent............")
+
+  AWSInspectorLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Environment:
+        Variables:
+          S3Bucket: !Ref S3BucketName
+          KMSKeyArn: !GetAtt CMK.Arn
+      FunctionName: AWSInspectorLambda
+      Description: Convert S3 Object to Pre-Signed URL and sent it to Email Recepient
+      Handler: index.lambda_handler
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/${AWSInspectorLambdaRole}"
+      Runtime: python3.12
+      Timeout: 300
+      Code:
+        ZipFile: !Sub |
+          import os
+          import boto3
+          from botocore import client
+
+          inspector2_client = boto3.client('inspector2')
+          s3_client = boto3.client("s3", config=client.Config(signature_version='s3v4'))
+
+          def lambda_handler(event, context):
+
+               findings_response = inspector2_client.create_findings_report(
+                  reportFormat='CSV',
+                  s3Destination={
+                      'bucketName': os.environ['S3Bucket'],
+                      'kmsKeyArn': os.environ['KMSKeyArn']
+                      }
+                    )
+              # print(findings_response)
+
+  AWSInspectorLambdaSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSInspectorLambdaSchedulerRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Action: 
+            - sts:AssumeRole
+          Principal:
+            Service: 
+              - scheduler.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: AWSInspectorLambdaSchedulerPolicies
+          PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: '*'
+
+  LambdaCronScheduler:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Name: AWSInspectorLambdaScheduler
+      Description: 'Cron Scheduler for once a week for calling Lambda Function AWSInspectorLambda'
+      ScheduleExpression: !Ref LambdaCronSchedulerExpression
+      State: ENABLED
+      Target:
+        Arn: !GetAtt AWSInspectorLambda.Arn
+        RoleArn: !GetAtt AWSInspectorLambdaSchedulerRole.Arn
+
+Outputs:
+  CMEncryptionKey:
+    Description: Customer Managed Encryption Key ID
+    Value: !Ref CMK
+    Export:
+      Name: "CustomerEncryptionKey"
+
+  S3Bucket:
+    Description: S3 Bucket Reference
+    Value: !Ref CustomerS3Bucket
+    Export:
+      Name: "CustomerS3Bucket"
+
+  AWSInspectorLambdaRole:
+    Description: IAM Role attached to AWS Inspector Lambda Function
+    Value: !Ref AWSInspectorLambdaRole
+    Export:
+      Name: "CustomerAWSInspectorLambdaRole"
+
+  AWSS3PreSignedURLRole:
+    Description: IAM Role attached to AWS PreSigned Lambda Function
+    Value: !Ref AWSS3PreSignedURLRole
+    Export:
+      Name: "CustomerAWSS3PreSignedURLRole"
+
+  AWSInspectorLambdaSchedulerRole:
+    Description: AWS Cron Scheduler IAM Role
+    Value: !Ref AWSInspectorLambdaSchedulerRole
+    Export:
+      Name: "CustomerAWSInspectorLambdaSchedulerRole"
+
+  AWSInspectorLambda:
+    Description: AWS Inspector Lambda Function
+    Value: !Ref AWSInspectorLambda
+    Export:
+      Name: "CustomerAWSInspectorLambda"
+  
+  LambdaCronScheduler:
+    Description: AWS Inspector Lambda Function
+    Value: !Ref LambdaCronScheduler
+    Export:
+      Name: "CustomerLambdaCronScheduler"
+
+  AWSS3PreSignedURLLambda:
+    Description: AWS Inspector Lambda Function
+    Value: !Ref AWSS3PreSignedURLLambda
+    Export:
+      Name: "CustomerAWSS3PreSignedURLLambda"
+
+  SESSourceEmailIdentity:
+    Description: AWS SES Source Email Identity
+    Value: !Ref SESSourceEmailIdentity
+    Export:
+      Name: "CustomerSESSourceEmailIdentity"
+
+  SESDestinationTOEmailIdentity:
+    Description: AWS SES Destination TO Email Identity
+    Value: !Ref SESDestinationTOEmailIdentity
+    Export:
+      Name: "CustomerSESDestinationTOEmailIdentity"
