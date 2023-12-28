@@ -26,8 +26,8 @@ Parameters:
   LambdaCronSchedulerExpression:
     Type: String
     Description: Lambda Cron Scheduler Expression -> Runs every Sunday 11 AM every month every year
-    # Default: cron(0 11 ? * SUN *)
-    Default: cron(0/5 8-17 * * ? *)
+    Default: cron(0 11 ? * SUN *)
+    # Default: cron(0/5 8-17 * * ? *)
 
   SourceEmailIdentity:
     Type: String
