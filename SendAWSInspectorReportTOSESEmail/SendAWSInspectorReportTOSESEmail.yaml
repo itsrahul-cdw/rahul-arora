@@ -368,7 +368,6 @@ Resources:
                 'ToAddresses': [
                   os.environ['DestinationTOEmailIdentity1'],
                   os.environ['DestinationTOEmailIdentity2'],
-                    ]
                 ],
               },
               Message={
