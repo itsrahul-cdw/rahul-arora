@@ -25,18 +25,24 @@ Parameters:
 
   LambdaCronSchedulerExpression:
     Type: String
-    Description: Lambda Cron Scheduler Expression
-    Default: cron(0 0 ? * SUN *)
+    Description: Lambda Cron Scheduler Expression -> Runs every Sunday 11 AM every month every year
+    # Default: cron(0 11 ? * SUN *)
+    Default: cron(0/5 8-17 * * ? *)
 
   SourceEmailIdentity:
     Type: String
     Description: SES Source Email Identity
     Default: rahul.arora@cdw.com
 
-  DestinationTOEmailIdentity:
+  DestinationTOEmailIdentity1:
     Type: String
-    Description: SES Destination TO Recepient Email Identity
-    Default: shabreenunisa.zakeer@cdw.com
+    Description: SES Destination TO Recepient-1 Email Identity
+    Default: vinay.subramaniam@cdw.com
+
+  DestinationTOEmailIdentity2:
+    Type: String
+    Description: SES Destination TO Recepient-2 Email Identity
+    Default: manoj.prabhu@cdw.com
     
 Resources:
 
@@ -130,10 +136,15 @@ Resources:
     Properties:
       EmailIdentity: !Ref SourceEmailIdentity
 
-  SESDestinationTOEmailIdentity:
+  SESDestinationTOEmailIdentity1:
     Type: AWS::SES::EmailIdentity
     Properties:
-      EmailIdentity: !Ref DestinationTOEmailIdentity
+      EmailIdentity: !Ref DestinationTOEmailIdentity1
+
+  SESDestinationTOEmailIdentity2:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DestinationTOEmailIdentity2
 
   # SESDestinationCCEmailIdentity:
   #   Type: AWS::SES::EmailIdentity
@@ -306,7 +317,8 @@ Resources:
       Environment:
         Variables:
           SourceEmailIdentity: !Ref SourceEmailIdentity
-          DestinationTOEmailIdentity: !Ref DestinationTOEmailIdentity
+          DestinationTOEmailIdentity1: !Ref DestinationTOEmailIdentity1
+          DestinationTOEmailIdentity2: !Ref DestinationTOEmailIdentity2
           # DestinationCCEmailIdentity: !Ref DestinationCCEmailIdentity
           EmailSubject: !Ref EmailSubject
       FunctionName: AWSS3PreSignedURLLambda
@@ -354,14 +366,16 @@ Resources:
                 #   os.environ['DestinationCCEmailIdentity'],
                 # ],
                 'ToAddresses': [
-                  os.environ['DestinationTOEmailIdentity']
+                  os.environ['DestinationTOEmailIdentity1'],
+                  os.environ['DestinationTOEmailIdentity2'],
+                    ]
                 ],
               },
               Message={
                 'Body': {
                   'Html': {
                     'Charset': 'UTF-8',
-                    'Data': f'Here is the inspector report : <a href="{s3_response}">Amazon SES Developer Guide</a> Please download',
+                    'Data': f'Here is the inspector report : <a href="{s3_response}">AWS Inspector Report</a> Please download',
                     },                                                                              
                   # 'Text': {
                   #   'Charset': 'UTF-8',
@@ -501,8 +515,14 @@ Outputs:
     Export:
       Name: "CustomerSESSourceEmailIdentity"
 
-  SESDestinationTOEmailIdentity:
-    Description: AWS SES Destination TO Email Identity
-    Value: !Ref SESDestinationTOEmailIdentity
+  SESDestinationTOEmailIdentity1:
+    Description: AWS SES Destination TO Email Identity 1
+    Value: !Ref SESDestinationTOEmailIdentity1
     Export:
-      Name: "CustomerSESDestinationTOEmailIdentity"
+      Name: "CustomerSESDestinationTOEmailIdentity1"
+
+  ESDestinationTOEmailIdentity2:
+    Description: AWS SES Destination TO Email Identity 2
+    Value: !Ref SESDestinationTOEmailIdentity2
+    Export:
+      Name: "CustomerSESDestinationTOEmailIdentity2"
